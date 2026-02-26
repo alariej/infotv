@@ -1,0 +1,14 @@
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+  background: radial-gradient(circle at 20% 20%, #17354a 0%, #08131c 50%, #060b11 100%);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
