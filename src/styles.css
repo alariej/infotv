@@ -12,3 +12,25 @@ body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
+.rhap_container {
+  background: #0f2432;
+  border: 1px solid #35566b;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.rhap_main-controls-button,
+.rhap_volume-button,
+.rhap_repeat-button,
+.rhap_download-progress,
+.rhap_progress-filled,
+.rhap_volume-filled,
+.rhap_volume-indicator,
+.rhap_progress-indicator {
+  color: #9cc9e3;
+}
+
+.rhap_time {
+  color: #9cc9e3;
+  font-size: 12px;
+}
