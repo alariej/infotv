@@ -21,8 +21,13 @@ const EXTRA_MAP_URL = `https://embed.ventusky.com/?p=${AQI_EMBED_LAT};${AQI_EMBE
 
 const SRF_NEWS_RSS_URL = 'https://www.srf.ch/news/bnf/rss/1646';
 const NEWS_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-const NEWS_MAX_ITEMS = 6;
-const NEWS_INTERNATIONAL_ONLY = true;
+const NEWS_SWISS_MAX_ITEMS = 3;
+const NEWS_INTERNATIONAL_MAX_ITEMS = 7;
+const NEWS_TOTAL_ITEMS = NEWS_SWISS_MAX_ITEMS + NEWS_INTERNATIONAL_MAX_ITEMS;
+const NEWS_SCROLL_VISIBLE_ITEMS = 6;
+const NEWS_SCROLL_SECONDS_PER_ITEM = 8;
+const SRF_SWISS_LINK_PATTERN = /\/news\/schweiz(\/|$)/;
+const SRF_INTERNATIONAL_LINK_PATTERN = /\/news\/international(\/|$)/;
 
 const RADIO_METADATA_REFRESH_INTERVAL_MS = 30000;
 const RADIO_METADATA_MAX_BLOCKS = 4;
@@ -31,7 +36,7 @@ const RADIO_METADATA_SCAN_MAX_BYTES = 512 * 1024;
 const RADIO_STATIONS = [
 	{
 		id: 'chill',
-		label: 'Chill',
+		label: 'CDM Chillout',
 		url: 'https://radio4.cdm-radio.com:18020/stream-mp3-Chill',
 		metadataUrl: 'https://radio4.cdm-radio.com:18020/stream-mp3-Chill',
 	},
@@ -107,6 +112,14 @@ function splitNowPlaying(streamTitle) {
 	return { artist: '', title: streamTitle };
 }
 
+function getNewsItemKey(item, fallback = '') {
+	return item.guid || item.link || item.title || fallback;
+}
+
+function sanitizeNewsTitle(title) {
+	return (title ?? '').replace(/^\-\s+/, '').trim();
+}
+
 function parseNewsFeed(xmlText) {
 	const parser = new DOMParser();
 	const xml = parser.parseFromString(xmlText, 'application/xml');
@@ -115,31 +128,53 @@ function parseNewsFeed(xmlText) {
 		throw new Error('Failed to parse SRF RSS feed');
 	}
 
-	const feedTitle = xml.querySelector('channel > title')?.textContent?.trim() ?? 'SRF News';
 	const allItems = Array.from(xml.querySelectorAll('channel > item'))
 		.map((itemNode, index) => {
-			const title = itemNode.querySelector('title')?.textContent?.trim() ?? '';
+			const title = sanitizeNewsTitle(itemNode.querySelector('title')?.textContent ?? '');
 			const link = itemNode.querySelector('link')?.textContent?.trim() ?? '';
 			const guid = itemNode.querySelector('guid')?.textContent?.trim() ?? `${index}-${title}`;
 			const pubDate = itemNode.querySelector('pubDate')?.textContent?.trim() ?? '';
+			const timestamp = Date.parse(pubDate);
 			return {
 				title,
 				link,
 				guid,
 				pubDate,
+				timestamp: Number.isFinite(timestamp) ? timestamp : 0,
 			};
 		})
 		.filter(item => item.title);
 
-	const filteredItems = NEWS_INTERNATIONAL_ONLY
-		? allItems.filter(item => /\/news\/international(\/|$)/.test(item.link))
-		: allItems;
+	const sortByTimestampDesc = (first, second) => second.timestamp - first.timestamp;
+	const swissItems = allItems
+		.filter(item => SRF_SWISS_LINK_PATTERN.test(item.link))
+		.sort(sortByTimestampDesc)
+		.slice(0, NEWS_SWISS_MAX_ITEMS);
+	const internationalItems = allItems
+		.filter(item => SRF_INTERNATIONAL_LINK_PATTERN.test(item.link))
+		.sort(sortByTimestampDesc)
+		.slice(0, NEWS_INTERNATIONAL_MAX_ITEMS);
 
-	const items = filteredItems.slice(0, NEWS_MAX_ITEMS);
+	const selectedByKey = new Map();
+	for (const item of [...swissItems, ...internationalItems]) {
+		selectedByKey.set(getNewsItemKey(item), item);
+	}
+
+	const items = Array.from(selectedByKey.values()).sort(sortByTimestampDesc).slice(0, NEWS_TOTAL_ITEMS);
+
+	if (items.length < NEWS_TOTAL_ITEMS) {
+		const selectedKeys = new Set(items.map(item => getNewsItemKey(item)));
+		const fallbackItems = allItems
+			.filter(item => !selectedKeys.has(getNewsItemKey(item)))
+			.sort(sortByTimestampDesc)
+			.slice(0, NEWS_TOTAL_ITEMS - items.length);
+		items.push(...fallbackItems);
+		items.sort(sortByTimestampDesc);
+	}
 
 	return {
-		feedTitle: NEWS_INTERNATIONAL_ONLY ? 'SRF International News' : feedTitle,
-		items,
+		feedTitle: 'SRF Schweiz + International',
+		items: items.map(({ timestamp, ...item }) => item),
 	};
 }
 
@@ -346,7 +381,7 @@ export default function App() {
 	});
 	const [newsState, setNewsState] = React.useState({
 		status: 'loading',
-		feedTitle: 'SRF News',
+		feedTitle: 'SRF Schweiz + International',
 		updatedAt: '',
 		items: [],
 	});
@@ -485,6 +520,11 @@ export default function App() {
 		};
 	}, [width, height]);
 
+	const newsTickerVisibleItems = Math.min(NEWS_SCROLL_VISIBLE_ITEMS, Math.max(newsState.items.length, 1));
+	const newsTickerDurationSeconds = Math.max(18, Math.round(newsState.items.length * NEWS_SCROLL_SECONDS_PER_ITEM));
+	const newsTickerLoopItems = newsState.items.length > 1 ? [...newsState.items, ...newsState.items] : newsState.items;
+	const hasAnimatedNewsTicker = newsState.items.length > 1;
+
 	return (
 		<View style={[styles.screen, { padding: ui.outerPadding }]}>
 			<View style={[styles.grid, { gap: ui.gridGap }]}>
@@ -572,21 +612,45 @@ export default function App() {
 										</Text>
 									) : null}
 
-									{newsState.items.map((item, index) => (
-										<Text
-											key={item.guid || item.link || `${index}-${item.title}`}
-											style={[
-												styles.newsItem,
-												{
-													fontSize: ui.newsSize,
-													lineHeight: Math.round(ui.newsSize * 1.3),
-												},
-											]}
-											numberOfLines={2}
+									{newsState.status === 'live' && newsState.items.length > 0 ? (
+										<div
+											className="newsTickerViewport"
+											style={{ borderRadius: `${ui.innerRadius}px` }}
 										>
-											{index + 1}. {item.title}
+											<div
+												className={`newsTickerTrack${hasAnimatedNewsTicker ? ' is-animated' : ''}`}
+												style={{
+													'--ticker-loop-count': `${newsTickerLoopItems.length}`,
+													'--ticker-visible-items': `${newsTickerVisibleItems}`,
+													'--ticker-duration': `${newsTickerDurationSeconds}s`,
+													fontSize: `${ui.newsSize}px`,
+													lineHeight: `${Math.round(ui.newsSize * 1.2)}px`,
+												}}
+											>
+												{newsTickerLoopItems.map((item, index) => {
+													return (
+														<div
+															key={`${getNewsItemKey(item, `headline-${index}`)}-${index}`}
+															className="newsTickerItem"
+															title={item.title}
+														>
+															{item.title}
+														</div>
+													);
+												})}
+											</div>
+										</div>
+									) : null}
+									{newsState.status === 'live' && newsState.items.length === 0 ? (
+										<Text
+											style={[
+												styles.newsMuted,
+												{ fontSize: Math.max(12, Math.round(ui.newsSize * 0.72)) },
+											]}
+										>
+											Keine Schlagzeilen gefunden
 										</Text>
-									))}
+									) : null}
 
 									{newsState.status === 'live' && newsState.updatedAt ? (
 										<Text
@@ -733,9 +797,6 @@ const styles = StyleSheet.create({
 		flex: 1,
 		minHeight: 0,
 		overflow: 'hidden',
-	},
-	newsItem: {
-		color: '#d7ebf8',
 	},
 	newsPanel: {
 		flex: 1,
