@@ -374,6 +374,7 @@ export default function App() {
 	const { width, height } = useWindowDimensions();
 	const [mapEmbedReloadToken, setMapEmbedReloadToken] = React.useState(0);
 	const [selectedStationId, setSelectedStationId] = React.useState(RADIO_STATIONS[0].id);
+	const [clockNow, setClockNow] = React.useState(() => new Date());
 	const [radioNowPlaying, setRadioNowPlaying] = React.useState({
 		status: 'idle',
 		artist: '',
@@ -396,6 +397,13 @@ export default function App() {
 		}, AQI_EMBED_REFRESH_INTERVAL_MS);
 
 		return () => clearInterval(refreshTimer);
+	}, []);
+
+	React.useEffect(() => {
+		const clockTimer = setInterval(() => {
+			setClockNow(new Date());
+		}, 1000);
+		return () => clearInterval(clockTimer);
 	}, []);
 
 	const temperatureEmbedSrc = React.useMemo(
@@ -514,6 +522,8 @@ export default function App() {
 			stationButtonTextSize: Math.max(12, Math.round(16 * scale)),
 			newsSize: Math.max(14, Math.round(22 * scale)),
 			radioSize: Math.max(14, Math.round(21 * scale)),
+			clockTimeSize: Math.max(75, Math.round(132 * scale)),
+			clockDateSize: Math.max(13, Math.round(17 * scale)),
 			stationButtonPadX: Math.max(10, Math.round(12 * scale)),
 			stationButtonPadY: Math.max(8, Math.round(10 * scale)),
 			innerRadius: Math.max(3, Math.round(6 * scale)),
@@ -524,6 +534,17 @@ export default function App() {
 	const newsTickerDurationSeconds = Math.max(18, Math.round(newsState.items.length * NEWS_SCROLL_SECONDS_PER_ITEM));
 	const newsTickerLoopItems = newsState.items.length > 1 ? [...newsState.items, ...newsState.items] : newsState.items;
 	const hasAnimatedNewsTicker = newsState.items.length > 1;
+	const clockTimeText = clockNow.toLocaleTimeString('de-CH', {
+		hour: '2-digit',
+		minute: '2-digit',
+		hour12: false,
+	});
+	const clockDateText = clockNow.toLocaleDateString('de-CH', {
+		weekday: 'long',
+		day: '2-digit',
+		month: '2-digit',
+		year: 'numeric',
+	}).replace(', ', ' ');
 
 	return (
 		<View style={[styles.screen, { padding: ui.outerPadding }]}>
@@ -670,85 +691,98 @@ export default function App() {
 							</View>
 
 							<View style={styles.mergedLowerRightSectionBottom}>
-								<View style={styles.radioPanel}>
-									<div style={stationButtonsRowStyle}>
-										{RADIO_STATIONS.map(station => {
-											const isActive = station.id === selectedStation.id;
-											return (
-												<button
-													key={station.id}
-													type="button"
-													onClick={() => setSelectedStationId(station.id)}
-													style={{
-														...stationButtonBaseStyle,
-														borderRadius: ui.innerRadius,
-														padding: `${ui.stationButtonPadY}px ${ui.stationButtonPadX}px`,
-														fontSize: `${ui.stationButtonTextSize}px`,
-														backgroundColor: isActive ? '#2c5875' : '#183244',
-														borderColor: isActive ? '#79b7df' : '#3e6278',
-														color: isActive ? '#ecf8ff' : '#cfe3f1',
-													}}
+								<View style={[styles.lowerRightBottomSplit, { gap: ui.bodyGap }]}>
+									<View style={styles.radioPane}>
+										<View style={styles.radioPanel}>
+											<div style={stationButtonsRowStyle}>
+												{RADIO_STATIONS.map(station => {
+													const isActive = station.id === selectedStation.id;
+													return (
+														<button
+															key={station.id}
+															type="button"
+															onClick={() => setSelectedStationId(station.id)}
+															style={{
+																...stationButtonBaseStyle,
+																borderRadius: ui.innerRadius,
+																padding: `${ui.stationButtonPadY}px ${ui.stationButtonPadX}px`,
+																fontSize: `${ui.stationButtonTextSize}px`,
+																backgroundColor: isActive ? '#2c5875' : '#183244',
+																borderColor: isActive ? '#79b7df' : '#3e6278',
+																color: isActive ? '#ecf8ff' : '#cfe3f1',
+															}}
+														>
+															{station.label}
+														</button>
+													);
+												})}
+											</div>
+
+											<Text style={[styles.radioLine, { fontSize: ui.radioSize }]}>
+												Station: {selectedStation.label}
+											</Text>
+											{radioNowPlaying.status === 'live' && radioNowPlaying.artist ? (
+												<Text
+													style={[
+														styles.radioMetaLine,
+														{ fontSize: Math.max(12, Math.round(ui.radioSize * 0.82)) },
+													]}
 												>
-													{station.label}
-												</button>
-											);
-										})}
-									</div>
+													Now Playing: {radioNowPlaying.artist} - {radioNowPlaying.title}
+												</Text>
+											) : null}
+											{radioNowPlaying.status === 'live' && !radioNowPlaying.artist ? (
+												<Text
+													style={[
+														styles.radioMetaLine,
+														{ fontSize: Math.max(12, Math.round(ui.radioSize * 0.82)) },
+													]}
+												>
+													Now Playing: {radioNowPlaying.title}
+												</Text>
+											) : null}
+											{radioNowPlaying.status === 'loading' ? (
+												<Text
+													style={[
+														styles.radioMetaMuted,
+														{ fontSize: Math.max(12, Math.round(ui.radioSize * 0.78)) },
+													]}
+												>
+													Loading metadata...
+												</Text>
+											) : null}
+											{radioNowPlaying.status === 'unavailable' ? (
+												<Text
+													style={[
+														styles.radioMetaMuted,
+														{ fontSize: Math.max(12, Math.round(ui.radioSize * 0.78)) },
+													]}
+												>
+													Now playing metadata unavailable
+												</Text>
+											) : null}
 
-									<Text style={[styles.radioLine, { fontSize: ui.radioSize }]}>
-										Station: {selectedStation.label}
-									</Text>
-									{radioNowPlaying.status === 'live' && radioNowPlaying.artist ? (
-										<Text
-											style={[
-												styles.radioMetaLine,
-												{ fontSize: Math.max(12, Math.round(ui.radioSize * 0.82)) },
-											]}
-										>
-											Now Playing: {radioNowPlaying.artist} - {radioNowPlaying.title}
-										</Text>
-									) : null}
-									{radioNowPlaying.status === 'live' && !radioNowPlaying.artist ? (
-										<Text
-											style={[
-												styles.radioMetaLine,
-												{ fontSize: Math.max(12, Math.round(ui.radioSize * 0.82)) },
-											]}
-										>
-											Now Playing: {radioNowPlaying.title}
-										</Text>
-									) : null}
-									{radioNowPlaying.status === 'loading' ? (
-										<Text
-											style={[
-												styles.radioMetaMuted,
-												{ fontSize: Math.max(12, Math.round(ui.radioSize * 0.78)) },
-											]}
-										>
-											Loading metadata...
-										</Text>
-									) : null}
-									{radioNowPlaying.status === 'unavailable' ? (
-										<Text
-											style={[
-												styles.radioMetaMuted,
-												{ fontSize: Math.max(12, Math.round(ui.radioSize * 0.78)) },
-											]}
-										>
-											Now playing metadata unavailable
-										</Text>
-									) : null}
+											<div style={audioPlayerWrapStyle}>
+												<AudioPlayer
+													src={selectedStation.url}
+													autoPlayAfterSrcChange={false}
+													showJumpControls={false}
+													customAdditionalControls={[]}
+													customVolumeControls={['VOLUME']}
+													layout="stacked-reverse"
+												/>
+											</div>
+										</View>
+									</View>
 
-									<div style={audioPlayerWrapStyle}>
-										<AudioPlayer
-											src={selectedStation.url}
-											autoPlayAfterSrcChange={false}
-											showJumpControls={false}
-											customAdditionalControls={[]}
-											customVolumeControls={['VOLUME']}
-											layout="stacked-reverse"
-										/>
-									</div>
+									<View style={[styles.clockPanel, { borderRadius: ui.innerRadius }]}>
+										<Text style={[styles.clockTime, { fontSize: ui.clockTimeSize }]}>
+											{clockTimeText}
+										</Text>
+										<Text style={[styles.clockDate, { fontSize: ui.clockDateSize }]}>
+											{clockDateText}
+										</Text>
+									</View>
 								</View>
 							</View>
 						</View>
@@ -830,6 +864,16 @@ const styles = StyleSheet.create({
 		borderTopWidth: 1,
 		borderTopColor: '#2d4b5d',
 	},
+	lowerRightBottomSplit: {
+		flex: 1,
+		minHeight: 0,
+		flexDirection: 'row',
+	},
+	radioPane: {
+		flex: 3,
+		minWidth: 0,
+		minHeight: 0,
+	},
 	radioPanel: {
 		flex: 1,
 		minHeight: 0,
@@ -843,5 +887,27 @@ const styles = StyleSheet.create({
 	},
 	radioMetaMuted: {
 		color: '#8eaec2',
+	},
+	clockPanel: {
+		flex: 2,
+		minWidth: 0,
+		minHeight: 0,
+		borderWidth: 1,
+		borderColor: '#2f4d61',
+		backgroundColor: '#0f2432',
+		alignItems: 'center',
+		justifyContent: 'center',
+		paddingHorizontal: 4,
+	},
+	clockTime: {
+		color: '#ecf8ff',
+		fontWeight: '700',
+		fontVariant: ['tabular-nums'],
+		textAlign: 'center',
+	},
+	clockDate: {
+		color: '#9ac6df',
+		fontWeight: '600',
+		marginTop: 4,
 	},
 });
