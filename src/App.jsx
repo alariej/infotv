@@ -8,6 +8,7 @@ const AQI_EMBED_ZOOM = 4;
 
 const TEMPERATURE_EMBED_LAYER = 'temperature-2m';
 const TEMPERATURE_EMBED_WIND = 'normal';
+const TEMPERATURE_EMBED_HOUR_LOCAL = 16;
 const TEMPERATURE_EMBED_URL = `https://embed.ventusky.com/?p=${AQI_EMBED_LAT};${AQI_EMBED_LON};${AQI_EMBED_ZOOM}&l=${TEMPERATURE_EMBED_LAYER}&w=${TEMPERATURE_EMBED_WIND}`;
 
 const AQI_EMBED_LAYER = 'aqi';
@@ -18,6 +19,10 @@ const AQI_EMBED_URL = `https://embed.ventusky.com/?p=${AQI_EMBED_LAT};${AQI_EMBE
 const EXTRA_MAP_LAYER = 'radar';
 const EXTRA_MAP_WIND = 'off';
 const EXTRA_MAP_URL = `https://embed.ventusky.com/?p=${AQI_EMBED_LAT};${AQI_EMBED_LON};${AQI_EMBED_ZOOM}&l=${EXTRA_MAP_LAYER}&w=${EXTRA_MAP_WIND}`;
+const ZURICH_TEMPERATURE_LAT = 47.3769;
+const ZURICH_TEMPERATURE_LON = 8.5417;
+const ZURICH_TEMPERATURE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const ZURICH_TEMPERATURE_API_URL = `https://api.open-meteo.com/v1/forecast?latitude=${ZURICH_TEMPERATURE_LAT}&longitude=${ZURICH_TEMPERATURE_LON}&current=temperature_2m&temperature_unit=celsius&timezone=Europe%2FZurich`;
 
 const SRF_NEWS_RSS_URL = 'https://www.srf.ch/news/bnf/rss/1646';
 const NEWS_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -47,6 +52,27 @@ const RADIO_STATIONS = [
 		metadataUrl: 'https://livestreaming-node-4.srg-ssr.ch/srgssr/srf4news/mp3/128',
 	},
 ];
+
+function formatVentuskyUtcTimeParam(date) {
+	const year = date.getUTCFullYear();
+	const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+	const day = String(date.getUTCDate()).padStart(2, '0');
+	const hour = String(date.getUTCHours()).padStart(2, '0');
+	return `${year}${month}${day}/${hour}`;
+}
+
+function getTodayTemperatureEmbedTimeParam(now = new Date()) {
+	const todayAtLocalHour = new Date(
+		now.getFullYear(),
+		now.getMonth(),
+		now.getDate(),
+		TEMPERATURE_EMBED_HOUR_LOCAL,
+		0,
+		0,
+		0,
+	);
+	return formatVentuskyUtcTimeParam(todayAtLocalHour);
+}
 
 function sleepWithAbort(ms, signal) {
 	return new Promise(resolve => {
@@ -386,6 +412,10 @@ export default function App() {
 		updatedAt: '',
 		items: [],
 	});
+	const [zurichTemperatureState, setZurichTemperatureState] = React.useState({
+		status: 'loading',
+		value: null,
+	});
 
 	React.useEffect(() => {
 		if (!Number.isFinite(AQI_EMBED_REFRESH_INTERVAL_MS) || AQI_EMBED_REFRESH_INTERVAL_MS <= 0) {
@@ -406,10 +436,10 @@ export default function App() {
 		return () => clearInterval(clockTimer);
 	}, []);
 
-	const temperatureEmbedSrc = React.useMemo(
-		() => `${TEMPERATURE_EMBED_URL}&refresh=${mapEmbedReloadToken}`,
-		[mapEmbedReloadToken],
-	);
+	const temperatureEmbedSrc = React.useMemo(() => {
+		const timeParam = getTodayTemperatureEmbedTimeParam();
+		return `${TEMPERATURE_EMBED_URL}&t=${timeParam}&refresh=${mapEmbedReloadToken}`;
+	}, [mapEmbedReloadToken]);
 	const aqiEmbedSrc = React.useMemo(() => `${AQI_EMBED_URL}&refresh=${mapEmbedReloadToken}`, [mapEmbedReloadToken]);
 	const extraMapSrc = React.useMemo(() => `${EXTRA_MAP_URL}&refresh=${mapEmbedReloadToken}`, [mapEmbedReloadToken]);
 	const selectedStation = RADIO_STATIONS.find(station => station.id === selectedStationId) ?? RADIO_STATIONS[0];
@@ -509,6 +539,50 @@ export default function App() {
 		};
 	}, []);
 
+	React.useEffect(() => {
+		const temperatureController = new AbortController();
+
+		const refreshTemperature = async () => {
+			try {
+				const response = await fetch(ZURICH_TEMPERATURE_API_URL, {
+					cache: 'no-store',
+					signal: temperatureController.signal,
+				});
+				if (!response.ok) {
+					throw new Error(`Unexpected Open-Meteo response: ${response.status}`);
+				}
+
+				const payload = await response.json();
+				const currentTemperature = Number(payload?.current?.temperature_2m);
+				if (!Number.isFinite(currentTemperature)) {
+					throw new Error('Open-Meteo current temperature is missing');
+				}
+				if (temperatureController.signal.aborted) {
+					return;
+				}
+
+				setZurichTemperatureState({
+					status: 'live',
+					value: currentTemperature,
+				});
+			} catch (error) {
+				if (!temperatureController.signal.aborted) {
+					setZurichTemperatureState(previous => ({
+						status: 'error',
+						value: previous.value,
+					}));
+				}
+			}
+		};
+
+		refreshTemperature();
+		const refreshTimer = setInterval(refreshTemperature, ZURICH_TEMPERATURE_REFRESH_INTERVAL_MS);
+		return () => {
+			temperatureController.abort();
+			clearInterval(refreshTimer);
+		};
+	}, []);
+
 	const ui = React.useMemo(() => {
 		const minSide = Math.max(360, Math.min(width, height));
 		const scale = Math.max(0.55, Math.min(minSide / 1080, 1.6));
@@ -522,8 +596,8 @@ export default function App() {
 			stationButtonTextSize: Math.max(12, Math.round(16 * scale)),
 			newsSize: Math.max(14, Math.round(22 * scale)),
 			radioSize: Math.max(14, Math.round(21 * scale)),
-			clockTimeSize: Math.max(75, Math.round(132 * scale)),
-			clockDateSize: Math.max(13, Math.round(17 * scale)),
+			clockTimeSize: Math.max(62, Math.round(108 * scale)),
+			clockTempSize: Math.max(27, Math.round(36 * scale)),
 			stationButtonPadX: Math.max(10, Math.round(12 * scale)),
 			stationButtonPadY: Math.max(8, Math.round(10 * scale)),
 			innerRadius: Math.max(3, Math.round(6 * scale)),
@@ -539,12 +613,11 @@ export default function App() {
 		minute: '2-digit',
 		hour12: false,
 	});
-	const clockDateText = clockNow.toLocaleDateString('de-CH', {
-		weekday: 'long',
-		day: '2-digit',
-		month: '2-digit',
-		year: 'numeric',
-	}).replace(', ', ' ');
+	const clockTemperatureText = Number.isFinite(zurichTemperatureState.value)
+		? `Zurich: ${zurichTemperatureState.value.toFixed(1)}C`
+		: zurichTemperatureState.status === 'error'
+			? 'Zurich: n/a'
+			: 'Zurich: ...';
 
 	return (
 		<View style={[styles.screen, { padding: ui.outerPadding }]}>
@@ -779,8 +852,8 @@ export default function App() {
 										<Text style={[styles.clockTime, { fontSize: ui.clockTimeSize }]}>
 											{clockTimeText}
 										</Text>
-										<Text style={[styles.clockDate, { fontSize: ui.clockDateSize }]}>
-											{clockDateText}
+										<Text style={[styles.clockDate, { fontSize: ui.clockTempSize }]}>
+											{clockTemperatureText}
 										</Text>
 									</View>
 								</View>
@@ -892,8 +965,6 @@ const styles = StyleSheet.create({
 		flex: 2,
 		minWidth: 0,
 		minHeight: 0,
-		borderWidth: 1,
-		borderColor: '#2f4d61',
 		backgroundColor: '#0f2432',
 		alignItems: 'center',
 		justifyContent: 'center',
@@ -908,6 +979,6 @@ const styles = StyleSheet.create({
 	clockDate: {
 		color: '#9ac6df',
 		fontWeight: '600',
-		marginTop: 4,
+		marginTop: 1,
 	},
 });
