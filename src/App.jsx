@@ -37,6 +37,7 @@ const SRF_INTERNATIONAL_LINK_PATTERN = /\/news\/international(\/|$)/;
 const RADIO_METADATA_REFRESH_INTERVAL_MS = 30000;
 const RADIO_METADATA_MAX_BLOCKS = 4;
 const RADIO_METADATA_SCAN_MAX_BYTES = 512 * 1024;
+const RADIO_METADATA_STATION_ID = 'chill';
 
 const RADIO_STATIONS = [
 	{
@@ -444,8 +445,18 @@ export default function App() {
 	const extraMapSrc = React.useMemo(() => `${EXTRA_MAP_URL}&refresh=${mapEmbedReloadToken}`, [mapEmbedReloadToken]);
 	const selectedStation = RADIO_STATIONS.find(station => station.id === selectedStationId) ?? RADIO_STATIONS[0];
 	const selectedStationMetadataUrl = selectedStation.metadataUrl ?? selectedStation.url;
+	const shouldShowRadioMetadata = selectedStation.id === RADIO_METADATA_STATION_ID;
 
 	React.useEffect(() => {
+		if (!shouldShowRadioMetadata) {
+			setRadioNowPlaying({
+				status: 'idle',
+				artist: '',
+				title: '',
+			});
+			return undefined;
+		}
+
 		const metadataController = new AbortController();
 		let latestTitle = '';
 
@@ -494,7 +505,7 @@ export default function App() {
 
 		pollNowPlaying();
 		return () => metadataController.abort();
-	}, [selectedStationMetadataUrl]);
+	}, [selectedStationMetadataUrl, shouldShowRadioMetadata]);
 
 	React.useEffect(() => {
 		const newsController = new AbortController();
@@ -791,10 +802,9 @@ export default function App() {
 												})}
 											</div>
 
-											<Text style={[styles.radioLine, { fontSize: ui.radioSize }]}>
-												Station: {selectedStation.label}
-											</Text>
-											{radioNowPlaying.status === 'live' && radioNowPlaying.artist ? (
+											{shouldShowRadioMetadata &&
+											radioNowPlaying.status === 'live' &&
+											radioNowPlaying.artist ? (
 												<Text
 													style={[
 														styles.radioMetaLine,
@@ -804,7 +814,9 @@ export default function App() {
 													Now Playing: {radioNowPlaying.artist} - {radioNowPlaying.title}
 												</Text>
 											) : null}
-											{radioNowPlaying.status === 'live' && !radioNowPlaying.artist ? (
+											{shouldShowRadioMetadata &&
+											radioNowPlaying.status === 'live' &&
+											!radioNowPlaying.artist ? (
 												<Text
 													style={[
 														styles.radioMetaLine,
@@ -814,7 +826,7 @@ export default function App() {
 													Now Playing: {radioNowPlaying.title}
 												</Text>
 											) : null}
-											{radioNowPlaying.status === 'loading' ? (
+											{shouldShowRadioMetadata && radioNowPlaying.status === 'loading' ? (
 												<Text
 													style={[
 														styles.radioMetaMuted,
@@ -824,7 +836,7 @@ export default function App() {
 													Loading metadata...
 												</Text>
 											) : null}
-											{radioNowPlaying.status === 'unavailable' ? (
+											{shouldShowRadioMetadata && radioNowPlaying.status === 'unavailable' ? (
 												<Text
 													style={[
 														styles.radioMetaMuted,
